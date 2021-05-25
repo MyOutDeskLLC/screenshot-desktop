@@ -22,54 +22,74 @@ if not exist "%~n0.exe" (
 endlocal & exit /b %errorlevel%
 
 */
-
-// reference
-// https://gallery.technet.microsoft.com/scriptcenter/eeff544a-f690-4f6b-a586-11eea6fc5eb8
-
 using System;
 using System.Runtime.InteropServices;
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Windows.Forms;
 using System.Collections.Generic;
 using Microsoft.VisualBasic;
-
-
-
-/// Provides functions to capture the entire screen, or a particular window, and save it to a file.
 
 public class ScreenCapture
 {
 
     static String deviceName = "";
     static Image capturedImage = null;
+    static bool fullscreen = true;
+    static String windowTitle = "";
+
+    // Default filename & type
+    static String file = "screenshot.jpg";
+    static System.Drawing.Imaging.ImageFormat format = System.Drawing.Imaging.ImageFormat.Jpeg;
+    static List<MonitorInfoWithHandle> _monitorInfos;
+
+    // For alternative capture technique using Windows.Forms
+    static bool useGraphics = false;
 
     /// Creates an Image object containing a screen shot the active window
-
-    public Image CaptureActiveWindow()
-    {
+    public Image CaptureActiveWindow() {
         return CaptureWindow(User32.GetForegroundWindow());
     }
 
-    /// Creates an Image object containing a screen shot of the entire desktop
 
-    public Image CaptureScreen()
-    {
-        if (!deviceName.Equals(""))
-        {
-            CaptureSpecificWindow();
-            if (capturedImage != null)
-            {
-                return capturedImage;
-            }
-            Console.WriteLine("Unable to capture image... using main display");
+    /// Creates an Image object containing a screen shot of the entire desktop
+    public Image CaptureScreen() {
+        if(useGraphics && !deviceName.Equals("")) {
+            return CaptureScreenUsingGraphics();
         }
-        return CaptureWindow(User32.GetDesktopWindow());
+        if(deviceName.Equals("")) {
+            return CaptureWindow(User32.GetDesktopWindow());
+        }
+        CaptureSpecificWindow();
+        if (capturedImage != null) {
+            return capturedImage;
+        }
+        Console.WriteLine("Unable to capture image... using main display");
+        return null;
+    }
+
+    // Captures the display using the graphics library with Winforms rather than GDI32
+    public Image CaptureScreenUsingGraphics() {
+        foreach(Screen screen in Screen.AllScreens) {
+            if(!screen.DeviceName.Equals(deviceName)) {
+                continue;
+            }
+            Console.WriteLine("discovered screen: " + deviceName);
+            User32.SCREENDATA screendata = new User32.SCREENDATA();
+            screendata.dmSize = (short)Marshal.SizeOf(typeof(User32.SCREENDATA));
+            User32.EnumDisplaySettings(screen.DeviceName, -1, ref screendata);
+            Bitmap bmp = new Bitmap(screendata.dmPelsWidth, screendata.dmPelsHeight);
+            Graphics g = Graphics.FromImage(bmp);
+            // Copy the screen data buffer into the BMP and return the BMP
+            g.CopyFromScreen(screendata.dmPositionX, screendata.dmPositionY, 0, 0, bmp.Size);
+            Console.WriteLine("Returning data from CopyFromScreen");
+            return bmp;
+        }
+        return null;
     }
 
     /// Creates an Image object containing a screen shot of a specific window
-
-    private Image CaptureWindow(IntPtr handle)
-    {
+    private Image CaptureWindow(IntPtr handle) {
         // get te hDC of the target window
         IntPtr hdcSrc = User32.GetWindowDC(handle);
         // get the size
@@ -80,6 +100,7 @@ public class ScreenCapture
         User32.ReleaseDC(handle, hdcSrc);
         return img;
     }
+
     private static Image CaptureWindowFromDC(IntPtr handle, IntPtr hdcSrc, User32.RECT windowRect){
         // get the size
         int width = windowRect.right - windowRect.left;
@@ -104,101 +125,19 @@ public class ScreenCapture
         return img;
     }
 
-    public void CaptureActiveWindowToFile(string filename, ImageFormat format)
-    {
+    public void CaptureActiveWindowToFile(string filename, ImageFormat format) {
         Image img = CaptureActiveWindow();
         img.Save(filename, format);
     }
 
-    public void CaptureScreenToFile(string filename, ImageFormat format)
-    {
+    public void CaptureScreenToFile(string filename, ImageFormat format) {
         Image img = CaptureScreen();
-        img.Save(filename, format);
+        if(img != null) {
+            img.Save(filename, format);
+        }
     }
 
-    static bool fullscreen = true;
-    static String file = "screenshot.bmp";
-    static System.Drawing.Imaging.ImageFormat format = System.Drawing.Imaging.ImageFormat.Bmp;
-    static String windowTitle = "";
-    static List<MonitorInfoWithHandle> _monitorInfos;
-
-    static void parseArguments()
-    {
-        String[] arguments = Environment.GetCommandLineArgs();
-        if (arguments.Length == 1)
-        {
-            printHelp();
-            Environment.Exit(0);
-        }
-        if (arguments[1].ToLower().Equals("/h") || arguments[1].ToLower().Equals("/help"))
-        {
-            printHelp();
-            Environment.Exit(0);
-        }
-        if (arguments[1].ToLower().Equals("/l") || arguments[1].ToLower().Equals("/list"))
-        {
-            PrintMonitorInfo();
-            Environment.Exit(0);
-        }
-
-        file = arguments[1];
-        Dictionary<String, System.Drawing.Imaging.ImageFormat> formats =
-        new Dictionary<String, System.Drawing.Imaging.ImageFormat>();
-
-        formats.Add("bmp", System.Drawing.Imaging.ImageFormat.Bmp);
-        formats.Add("emf", System.Drawing.Imaging.ImageFormat.Emf);
-        formats.Add("exif", System.Drawing.Imaging.ImageFormat.Exif);
-        formats.Add("jpg", System.Drawing.Imaging.ImageFormat.Jpeg);
-        formats.Add("jpeg", System.Drawing.Imaging.ImageFormat.Jpeg);
-        formats.Add("gif", System.Drawing.Imaging.ImageFormat.Gif);
-        formats.Add("png", System.Drawing.Imaging.ImageFormat.Png);
-        formats.Add("tiff", System.Drawing.Imaging.ImageFormat.Tiff);
-        formats.Add("wmf", System.Drawing.Imaging.ImageFormat.Wmf);
-
-
-        String ext = "";
-        if (file.LastIndexOf('.') > -1)
-        {
-            ext = file.ToLower().Substring(file.LastIndexOf('.') + 1, file.Length - file.LastIndexOf('.') - 1);
-        }
-        else
-        {
-            Console.WriteLine("Invalid file name - no extension");
-            Environment.Exit(7);
-        }
-
-        try
-        {
-            format = formats[ext];
-        }
-        catch (Exception e)
-        {
-            Console.WriteLine("Probably wrong file format:" + ext);
-            Console.WriteLine(e.ToString());
-            Environment.Exit(8);
-        }
-
-        if (arguments.Length <= 2){
-            return;
-        }
-
-        if (arguments[2].ToLower().Equals("/d") || arguments[2].ToLower().Equals("/display")){
-            if (arguments.Length == 2) {
-                Console.WriteLine("Must specify a display if passing /display");
-                Environment.Exit(9);
-            }
-            deviceName = arguments[3];
-        }
-        else if (arguments.Length > 2)
-        {
-            windowTitle = arguments[2];
-            fullscreen = false;
-        }
-
-    }
-
-    static void printHelp()
-    {
+    static void printHelp() {
         //clears the extension from the script name
         String scriptName = Environment.GetCommandLineArgs()[0];
         scriptName = scriptName.Substring(0, scriptName.Length);
@@ -224,49 +163,125 @@ public class ScreenCapture
         Console.WriteLine("displayName - a display name optained from running the script with /list");
     }
 
-    public static void Main()
-    {
+    public static void Main() {
         parseArguments();
         ScreenCapture sc = new ScreenCapture();
-        if (!fullscreen && !windowTitle.Equals(""))
-        {
-            try
-            {
-
-                Interaction.AppActivate(windowTitle);
-                Console.WriteLine("setting " + windowTitle + " on focus");
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine("Probably there's no window like " + windowTitle);
-                Console.WriteLine(e.ToString());
-                Environment.Exit(9);
-            }
-
-
+        if (!fullscreen && !windowTitle.Equals("")) {
+            activateTargetWindow();   
         }
-        try
-        {
-            if (fullscreen)
-            {
+        performCapture(sc);
+    }
+
+    static void performCapture(ScreenCapture sc) {
+        try {
+            if(fullscreen) {
                 Console.WriteLine("Taking a capture of the whole screen to " + file);
                 sc.CaptureScreenToFile(file, format);
-            }
-            else
-            {
+            } else {
                 Console.WriteLine("Taking a capture of the active window to " + file);
-                sc.CaptureActiveWindowToFile(file, format);
+                sc.CaptureActiveWindowToFile(file, format);   
             }
-        }
-        catch (Exception e)
-        {
+        } catch (Exception e) {
             Console.WriteLine("Check if file path is valid " + file);
             Console.WriteLine(e.ToString());
         }
     }
 
-    /// Helper class containing Gdi32 API functions
+    static void activateTargetWindow() {
+        try {
+            Interaction.AppActivate(windowTitle);
+            Console.WriteLine("setting " + windowTitle + " on focus");
+        } catch (Exception e) {
+            Console.WriteLine("Probably there's no window like " + windowTitle);
+            Console.WriteLine(e.ToString());
+            Environment.Exit(9);
+        }
+    }
 
+     static void parseArguments() {
+        String[] arguments = Environment.GetCommandLineArgs();
+        Dictionary<String,System.Drawing.Imaging.ImageFormat> formats = getSupportedFormats();
+        String ext = "";
+        
+        // screencapture.exe /h, /help
+        if (arguments.Length < 2 && (arguments[1].ToLower().Equals("/h") || arguments[1].ToLower().Equals("/help"))) {
+            printHelp();
+            Environment.Exit(0);
+        }
+        // screencapture.exe /l, /list
+        if (arguments[1].ToLower().Equals("/l") || arguments[1].ToLower().Equals("/list")) {
+            PrintMonitorInfo();
+            Environment.Exit(0);
+        }
+        if (arguments[1].LastIndexOf('.') <= -1) {
+            Console.WriteLine("Invalid file name - no extension");
+            Environment.Exit(7);
+        }
+        
+        file = arguments[1];
+        ext = file.ToLower().Substring(file.LastIndexOf('.') + 1, file.Length - file.LastIndexOf('.') - 1);
+
+        if(!formats.ContainsKey(ext)) {
+            Console.WriteLine("Unsupported file format:" + ext);
+            Environment.Exit(8);
+        }
+
+        if (arguments[2].ToLower().Equals("/d") || arguments[2].ToLower().Equals("/display")){
+            if (arguments.Length == 2) {
+                Console.WriteLine("Must specify a display if passing /display");
+                Environment.Exit(9);
+            }
+            deviceName = arguments[3];
+        } else if(arguments.Length >= 2) {
+            windowTitle = arguments[2];
+            fullscreen = false;
+        }
+
+        // If we need to fallback to using --graphics instead of GDI, use CopyFromScreen method
+        if(arguments.Length >= 4 && arguments[4].ToLower().Equals("--graphics")) {
+            Console.WriteLine("Using Graphics method to copy screen content");
+            useGraphics = true;
+        }
+      
+        // If this machine is using nvidia optimus attempt to switch into GPU mode
+        if(arguments.Length >= 4 && arguments[4].ToLower().Equals("--gpu")) {
+            Console.WriteLine("Contacting Nvidia Optimus");
+            initializeGpu();
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("nvapi64.dll", EntryPoint = "fake")]
+    static extern int LoadNvApi64();
+
+    [System.Runtime.InteropServices.DllImport("nvapi.dll", EntryPoint = "fake")]
+    static extern int LoadNvApi32();
+
+    // Attempts to load nvidia drivers to put this application into optimus mode to take screenshots
+    private static void initializeGpu() {
+        try {
+            if (Environment.Is64BitProcess) {
+                LoadNvApi64();
+            } else {
+                LoadNvApi32();
+            }
+        } catch { } // will always fail since 'fake' entry point doesn't exists
+    }
+
+    public static Dictionary<String,System.Drawing.Imaging.ImageFormat> getSupportedFormats() {
+        Dictionary<String, System.Drawing.Imaging.ImageFormat> formats = new Dictionary<String, System.Drawing.Imaging.ImageFormat>();
+        formats.Add("bmp", System.Drawing.Imaging.ImageFormat.Bmp);
+        formats.Add("emf", System.Drawing.Imaging.ImageFormat.Emf);
+        formats.Add("exif", System.Drawing.Imaging.ImageFormat.Exif);
+        formats.Add("jpg", System.Drawing.Imaging.ImageFormat.Jpeg);
+        formats.Add("jpeg", System.Drawing.Imaging.ImageFormat.Jpeg);
+        formats.Add("gif", System.Drawing.Imaging.ImageFormat.Gif);
+        formats.Add("png", System.Drawing.Imaging.ImageFormat.Png);
+        formats.Add("tiff", System.Drawing.Imaging.ImageFormat.Tiff);
+        formats.Add("wmf", System.Drawing.Imaging.ImageFormat.Wmf);
+        return formats;
+    }
+
+    /// Helper class containing Gdi32 API functions
     private class GDI32
     {
 
@@ -290,7 +305,6 @@ public class ScreenCapture
 
 
     /// Helper class containing User32 API functions
-
     public class User32
     {
         [StructLayout(LayoutKind.Sequential)]
@@ -314,6 +328,49 @@ public class ScreenCapture
         public static extern IntPtr GetWindowRect(IntPtr hWnd, ref RECT rect);
         [DllImport("user32.dll")]
         public static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll")]
+        public static extern bool EnumDisplaySettings(string lpszDeviceName, int iModeNum, ref SCREENDATA lpScreenData);
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct SCREENDATA
+        {
+            private const int CCHDEVICENAME = 0x20;
+            private const int CCHFORMNAME = 0x20;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 0x20)]
+            public string dmDeviceName;
+            public short dmSpecVersion;
+            public short dmDriverVersion;
+            public short dmSize;
+            public short dmDriverExtra;
+            public int dmFields;
+            public int dmPositionX;
+            public int dmPositionY;
+            public ScreenOrientation dmDisplayOrientation;
+            public int dmDisplayFixedOutput;
+            public short dmColor;
+            public short dmDuplex;
+            public short dmYResolution;
+            public short dmTTOption;
+            public short dmCollate;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 0x20)]
+            public string dmFormName;
+            public short dmLogPixels;
+            public int dmBitsPerPel;
+            public int dmPelsWidth;
+            public int dmPelsHeight;
+            public int dmDisplayFlags;
+            public int dmDisplayFrequency;
+            public int dmICMMethod;
+            public int dmICMIntent;
+            public int dmMediaType;
+            public int dmDitherType;
+            public int dmReserved1;
+            public int dmReserved2;
+            public int dmPanningWidth;
+            public int dmPanningHeight;
+        }
+
 
        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
        public struct MONITORINFOEX
