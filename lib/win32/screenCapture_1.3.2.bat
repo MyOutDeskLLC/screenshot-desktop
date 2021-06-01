@@ -245,11 +245,6 @@ public class ScreenCapture
       
         // If this machine is using nvidia optimus attempt to switch into GPU mode
         if(arguments.Length >= 4 && arguments[4].ToLower().Equals("--gpu")) {
-            if(deviceName == "") {
-                Console.WriteLine("Please specify a device when using --gpu");
-                Environment.Exit(7);
-
-            }
             Console.WriteLine("Contacting Nvidia Optimus");
             initializeGpu();
         }
